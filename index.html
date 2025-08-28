@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>3D Room Planner</title>
+    <!-- Tailwind CSS for styling the UI -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts for a clean look -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            font-family: 'Inter', sans-serif;
+            overflow: hidden; /* Prevent scrolling of the page */
+        }
+        #render-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            touch-action: none; /* Important for pointer events */
+        }
+        /* Style for the UI panel to float over the canvas */
+        .ui-panel {
+            position: absolute;
+            bottom: 1rem;
+            left: 1rem;
+            right: 1rem;
+            max-width: 400px;
+            margin: auto;
+        }
+    </style>
+</head>
+<body class="bg-gray-800">
+
+    <!-- The canvas where the 3D scene will be rendered -->
+    <canvas id="render-canvas"></canvas>
+
+    <!-- UI Panel -->
+    <div class="ui-panel p-4 bg-black bg-opacity-60 rounded-xl shadow-lg backdrop-blur-md border border-gray-600 text-white">
+        <h1 class="text-xl font-bold text-center mb-3">Room & Product Planner</h1>
+
+        <!-- Preset Furniture -->
+        <div class="mb-4">
+            <p class="font-semibold mb-2 text-center">Preset Cubes</p>
+            <div class="grid grid-cols-3 gap-2">
+                <button onclick="createProduct(1, 1, 1)" class="p-2 bg-blue-600 rounded-lg text-sm hover:bg-blue-700">Small</button>
+                <button onclick="createProduct(3, 3, 3)" class="p-2 bg-green-600 rounded-lg text-sm hover:bg-green-700">Medium</button>
+                <button onclick="createProduct(5, 5, 5)" class="p-2 bg-purple-600 rounded-lg text-sm hover:bg-purple-700">Large</button>
+            </div>
+        </div>
+
+        <!-- Custom Dimensions -->
+        <div>
+            <p class="font-semibold mb-2 text-center">Custom Dimensions</p>
+            <div class="grid grid-cols-3 gap-2 mb-2">
+                <input type="number" id="width" placeholder="W" class="w-full p-2 text-center bg-gray-700 border border-gray-500 rounded-lg">
+                <input type="number" id="height" placeholder="H" class="w-full p-2 text-center bg-gray-700 border border-gray-500 rounded-lg">
+                <input type="number" id="depth" placeholder="D" class="w-full p-2 text-center bg-gray-700 border border-gray-500 rounded-lg">
+            </div>
+            <button onclick="createCustomProduct()" class="w-full p-2 font-bold bg-yellow-500 text-black rounded-lg hover:bg-yellow-600">Create Custom</button>
+        </div>
+    </div>
+
+    <!-- Three.js library and OrbitControls -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script type="module">
+        // Import OrbitControls from the Three.js CDN
+        import { OrbitControls } from 'https://cdn.skypack.dev/three@0.128.0/examples/jsm/controls/OrbitControls.js';
+
+        // === BASIC SETUP ===
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x2d3748); // bg-gray-800
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('render-canvas'), antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+
+        // === CAMERA & CONTROLS ===
+        camera.position.set(10, 10, 10);
+        camera.lookAt(0, 0, 0);
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true; // Makes movement smoother
+        controls.dampingFactor = 0.05;
+        controls.screenSpacePanning = false; // Keeps panning on the ground plane
+        controls.maxPolarAngle = Math.PI / 2; // Prevent camera from going under the floor
+
+        // === LIGHTING ===
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+        scene.add(ambientLight);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.5);
+        dirLight.position.set(5, 10, 7);
+        scene.add(dirLight);
+
+        // === ROOM SETUP (GRID FLOOR) ===
+        const roomSize = 20;
+        const gridHelper = new THREE.GridHelper(roomSize, roomSize);
+        scene.add(gridHelper);
+        // This invisible plane is used for dragging calculations
+        const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+
+        // === PRODUCT & DRAGGING LOGIC ===
+        let product = null;
+        const raycaster = new THREE.Raycaster();
+        const pointer = new THREE.Vector2();
+        let isDragging = false;
+
+        // Make createProduct globally accessible
+        window.createProduct = (width, height, depth) => {
+            if (product) {
+                scene.remove(product);
+            }
+            const geometry = new THREE.BoxGeometry(width, height, depth);
+            const material = new THREE.MeshStandardMaterial({ color: 0x38bdf8 }); // A nice blue color
+            product = new THREE.Mesh(geometry, material);
+            product.position.y = height / 2; // Place it on the floor
+            scene.add(product);
+        };
+        
+        window.createCustomProduct = () => {
+            const w = parseFloat(document.getElementById('width').value) || 1;
+            const h = parseFloat(document.getElementById('height').value) || 1;
+            const d = parseFloat(document.getElementById('depth').value) || 1;
+            createProduct(w, h, d);
+        };
+
+        // Initialize with a default product
+        createProduct(2, 2, 2);
+
+        // === EVENT LISTENERS FOR DRAGGING ===
+        function onPointerDown(event) {
+            updatePointer(event);
+            raycaster.setFromCamera(pointer, camera);
+            const intersects = raycaster.intersectObjects([product]);
+
+            if (intersects.length > 0) {
+                isDragging = true;
+                controls.enabled = false; // Disable camera controls while dragging
+            }
+        }
+
+        function onPointerMove(event) {
+            if (isDragging) {
+                updatePointer(event);
+                raycaster.setFromCamera(pointer, camera);
+                
+                const intersectionPoint = new THREE.Vector3();
+                raycaster.ray.intersectPlane(floorPlane, intersectionPoint);
+                
+                // Keep the product within the grid boundaries
+                const halfSize = roomSize / 2;
+                product.position.x = Math.max(-halfSize, Math.min(halfSize, intersectionPoint.x));
+                product.position.z = Math.max(-halfSize, Math.min(halfSize, intersectionPoint.z));
+            }
+        }
+
+        function onPointerUp() {
+            isDragging = false;
+            controls.enabled = true; // Re-enable camera controls
+        }
+        
+        function updatePointer(event) {
+            const rect = renderer.domElement.getBoundingClientRect();
+            const touch = event.touches ? event.touches[0] : event;
+            pointer.x = ((touch.clientX - rect.left) / rect.width) * 2 - 1;
+            pointer.y = -((touch.clientY - rect.top) / rect.height) * 2 + 1;
+        }
+
+        renderer.domElement.addEventListener('pointerdown', onPointerDown);
+        renderer.domElement.addEventListener('pointermove', onPointerMove);
+        renderer.domElement.addEventListener('pointerup', onPointerUp);
+
+        // === WINDOW RESIZE HANDLING ===
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // === RENDER LOOP ===
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update(); // Update camera controls
+            renderer.render(scene, camera);
+        }
+
+        animate();
+    </script>
+</body>
+</html>
