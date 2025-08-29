@@ -78,6 +78,14 @@
             background-color: #374151; /* gray-700 */
             color: #d1d5db; /* gray-300 */
         }
+        /* Custom styles for the snap toggle */
+        .toggle-checkbox:checked {
+            right: 0;
+            border-color: #4f46e5;
+        }
+        .toggle-checkbox:checked + .toggle-label {
+            background-color: #4f46e5;
+        }
     </style>
 </head>
 <body class="bg-gray-800">
@@ -93,11 +101,19 @@
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
             </button>
         </div>
-        <div class="panel-content space-y-2">
+        <div class="panel-content space-y-3">
             <div>
                 <label for="grid-size" class="block text-sm text-center">Grid Size (ft)</label>
                 <input type="number" id="grid-size" value="50" class="w-full p-2 mt-1 text-center bg-gray-700 border border-gray-500 rounded-lg">
             </div>
+            <div class="flex items-center justify-between">
+                <label for="snap-toggle" class="text-sm">Snap to Grid</label>
+                <div class="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
+                    <input type="checkbox" name="snap-toggle" id="snap-toggle" class="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer"/>
+                    <label for="snap-toggle" class="toggle-label block overflow-hidden h-6 rounded-full bg-gray-600 cursor-pointer"></label>
+                </div>
+            </div>
+            <button onclick="toggleTopDownView()" class="w-full p-2 font-semibold bg-cyan-600 text-white rounded-lg hover:bg-cyan-700">Top-Down View</button>
             <button onclick="clearAllObjects()" class="w-full p-2 font-bold bg-red-600 text-white rounded-lg hover:bg-red-700">Clear All</button>
         </div>
     </div>
@@ -180,7 +196,8 @@
         renderer.setPixelRatio(window.devicePixelRatio);
 
         // === CAMERA & CONTROLS ===
-        camera.position.set(15, 20, 25);
+        const initialCameraPosition = new THREE.Vector3(15, 20, 25);
+        camera.position.copy(initialCameraPosition);
         const controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
         controls.maxPolarAngle = Math.PI / 2;
@@ -206,8 +223,9 @@
         let selectionOutline;
         const textureLoader = new THREE.TextureLoader();
         let currentUnit = 'ft';
+        let isSnappingEnabled = false;
+        let isTopDownView = false;
         
-        // State for tap vs drag detection
         let dragStartTime;
         let pointerDownPosition = new THREE.Vector2();
         let lastTap = 0;
@@ -223,6 +241,7 @@
         const textureUploader = document.getElementById('texture-uploader');
         const unitFtBtn = document.getElementById('unit-ft');
         const unitInBtn = document.getElementById('unit-in');
+        const snapToggle = document.getElementById('snap-toggle');
 
         // === CORE FUNCTIONS ===
         window.createCustomProduct = () => {
@@ -245,7 +264,7 @@
             
             if (h <= 0) h = 0.01; if (w <= 0) w = 0.01; if (l <= 0) l = 0.01;
 
-            createProduct(l, h, w); // Note: Three.js BoxGeometry is (width, height, depth) -> (l, h, w)
+            createProduct(l, h, w);
         };
 
         function createProduct(length, height, width) {
@@ -298,6 +317,22 @@
             unitFtBtn.classList.toggle('active', unit === 'ft');
             unitInBtn.classList.toggle('active', unit === 'in');
         };
+        
+        window.toggleTopDownView = () => {
+            isTopDownView = !isTopDownView;
+            if (isTopDownView) {
+                controls.enableRotate = false;
+                camera.position.set(0, 40, 0);
+            } else {
+                controls.enableRotate = true;
+                camera.position.copy(initialCameraPosition);
+            }
+            controls.target.set(0, 0, 0);
+        };
+
+        snapToggle.addEventListener('change', (e) => {
+            isSnappingEnabled = e.target.checked;
+        });
 
         colorPicker.addEventListener('input', (e) => {
             if (selectedProduct) {
@@ -323,7 +358,7 @@
         });
         
         textureUploader.addEventListener('change', (e) => {
-            if (!selectedProduct || !e.target.files || !e.target.files.length === 0) return;
+            if (!selectedProduct || !e.target.files || e.target.files.length === 0) return;
             const file = e.target.files[0];
             const url = URL.createObjectURL(file);
             textureLoader.load(url, (texture) => {
@@ -350,7 +385,7 @@
             if (h <= 0) h = 0.01; if (w <= 0) w = 0.01; if (l <= 0) l = 0.01;
 
             selectedProduct.geometry.dispose();
-            selectedProduct.geometry = new THREE.BoxGeometry(l, h, w); // (width, height, depth)
+            selectedProduct.geometry = new THREE.BoxGeometry(l, h, w);
             selectedProduct.position.y = h / 2;
 
             selectionOutline.geometry.dispose();
@@ -364,9 +399,8 @@
             transparencySlider.value = selectedProduct.material.opacity;
             rotationInputs.x.value = Math.round(THREE.MathUtils.radToDeg(selectedProduct.rotation.x));
             rotationInputs.y.value = Math.round(THREE.MathUtils.radToDeg(selectedProduct.rotation.y));
-            // Note the mapping from math terms to Three.js parameters
-            dimensionInputs.l.value = selectedProduct.geometry.parameters.width; // Length is width in Three.js
-            dimensionInputs.w.value = selectedProduct.geometry.parameters.depth; // Width is depth in Three.js
+            dimensionInputs.l.value = selectedProduct.geometry.parameters.width;
+            dimensionInputs.w.value = selectedProduct.geometry.parameters.depth;
             dimensionInputs.h.value = selectedProduct.geometry.parameters.height;
         }
         
@@ -416,9 +450,17 @@
             const intersectionPoint = new THREE.Vector3();
             raycaster.ray.intersectPlane(floorPlane, intersectionPoint);
 
+            let newX = intersectionPoint.x;
+            let newZ = intersectionPoint.z;
+
+            if (isSnappingEnabled) {
+                newX = Math.round(newX);
+                newZ = Math.round(newZ);
+            }
+
             const halfSize = roomSize / 2;
-            selectedProduct.position.x = Math.max(-halfSize, Math.min(halfSize, intersectionPoint.x));
-            selectedProduct.position.z = Math.max(-halfSize, Math.min(halfSize, intersectionPoint.z));
+            selectedProduct.position.x = Math.max(-halfSize, Math.min(halfSize, newX));
+            selectedProduct.position.z = Math.max(-halfSize, Math.min(halfSize, newZ));
             
             updateSelectionOutline();
         }
